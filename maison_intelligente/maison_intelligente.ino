@@ -165,6 +165,12 @@ int processLimitsMotor() {                                                      
 
     maxNear = arg2.toInt();
 
+    if (maxNear >= maxFar) {
+    Serial.println("  ERREUR! \n Limite inférieure plus grande que limite supérieure.");
+    maxNear = pastLimit;
+    icon = 3;
+    }
+
     icon = 1;
   }
   else if (arg1 == "lim_sup") {
@@ -172,17 +178,17 @@ int processLimitsMotor() {                                                      
 
     maxFar = arg2.toInt();
 
+    if (maxNear >= maxFar) {
+    Serial.println("  ERREUR! \n Limite inférieure plus grande que limite supérieure.");
+    maxFar = pastLimit;
+    icon = 3;
+    }
+
     icon = 1;
   }
   else {
     Serial.println("Ce n'est pas une commande valide, recommencez.");
     icon = 2;
-  }
-
-  if (maxNear >= maxFar) {
-    Serial.println("  ERREUR! \n Limite inférieure plus grande que limite supérieure.");
-    maxNear = pastLimit;
-    icon = 3;
   }
 
   return icon;
