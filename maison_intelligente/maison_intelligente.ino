@@ -1,8 +1,9 @@
-#include <U8g2lib.h>
 #include <LiquidCrystal.h>
 #include <LCD_I2C.h>
 #include <AccelStepper.h>
 #include <HCSR04.h>
+#include <U8g2lib.h>
+
 #define TRIGGER_PIN 11
 #define ECHO_PIN 12
 #define MOTOR_INTERFACE_TYPE 4
@@ -10,9 +11,6 @@
 #define IN_2 3
 #define IN_3 4
 #define IN_4 5
-#define CLK_PIN 22
-#define DIN_PIN 26
-#define CS_PIN  24
 const int RED_PIN = 8;
 const int BLUE_PIN = 9;
 const int ALARM = 13;
@@ -20,6 +18,10 @@ const int ALARM = 13;
 LCD_I2C lcd(0x27, 16, 2);
 HCSR04 hc(TRIGGER_PIN, ECHO_PIN);
 AccelStepper motor(MOTOR_INTERFACE_TYPE, IN_1, IN_3, IN_2, IN_4);
+
+#define DIN_PIN 26
+#define CLK_PIN 22
+#define CS_PIN 24
 U8G2_MAX7219_8X8_F_4W_SW_SPI u8g2(U8G2_R0, CLK_PIN, DIN_PIN, CS_PIN, U8X8_PIN_NONE, U8X8_PIN_NONE);
 
 unsigned long currentTime = 0;
@@ -37,6 +39,11 @@ const int right = 170;
 int alarmTreshold = 15;
 bool changeAlarmState = false;
 bool isMatrixOn = false;
+int whichIcon = 0;
+String fullCmd = "";
+String cmd = "";
+String arg1 = "";
+String arg2 = "";
 
 
 //SETUP AND LOOP
@@ -68,7 +75,7 @@ void setup() {                                                                  
 
   lcd.print("2486739");
   lcd.setCursor(0, 2);
-  lcd.print("Labo 4B");
+  lcd.print("MUAHAHAH");
   Serial.println("The screen has displayed my student's and lab number already!");
   delay(2000);
 
@@ -79,68 +86,96 @@ void loop() {                                                                   
   currentTime = millis();
 
   getDistance(currentTime);
-  refreshScreen(currentTime);
+  refreshScreen();
   aimingStates();
   alarmStates(currentTime);
-  commands(currentTime);
+  processCommands(currentTime);
 }
 
 //COMMANDS
-void commands(unsigned long currentTime) {
-  enum Icon {NO_ICON, CHECK, ERROR, LIMIT_CROSSED};
-  static Icon whichIcon = NO_ICON;
-  display(currentTime, whichIcon);
-  String cmd = "";
-  int slicedCmd;
+void processCommands(unsigned long currentTime) {                                               //processCommands
+  enum Icon {NO_ICON, CHECK, ERROR, LIMIT_ROSSED};
+  Icon _whichIcon = NO_ICON;
+  bool isWrong = false;
+
+  displayIcon(currentTime, whichIcon);
 
   if (Serial.available() > 0) {
-    cmd = Serial.readStringUntil('\n');
+    fullCmd = Serial.readStringUntil('\n');
+    Serial.println("Arduino a compris: '" + fullCmd + "'");
+    analyseCommand();
 
-    if (cmd == "gDist") {
+    if (cmd == "gDist" || cmd == "g_dist") {
       Serial.println(distance);
       isMatrixOn = true;
       whichIcon = CHECK;
     }
-    else if (cmd.startsWith("cfg;alm;")) {
-      cmd = cmd.substring(8);
-      alarmTreshold = cmd.toInt();
-      isMatrixOn = true;
-      whichIcon = CHECK;
+    else if (cmd == "cfg") {
+      if (arg1 == "alm") {
+        alarmTreshold = arg2.toInt();
+        isMatrixOn = true;
+        whichIcon = CHECK;
+      }
+      else if (arg1 == "lim_inf" || arg1 == "lim_sup") {
+        isMatrixOn = true;
+        whichIcon = processLimitsMotor();
+      }
+      else {isWrong = true;}
     }
-    else if (cmd.startsWith("cfg;lim_")) {
-      isMatrixOn = true;
-      whichIcon = processLimitsMotor(cmd);
-    }
-    else {
-      Serial.println("Arduino a compris: '" + cmd + "'! Ce n'est pas une commande valide, recommencez.");
+    else {isWrong = true;}
+
+
+    if (isWrong) {
+      Serial.println("Ce n'est pas une commande valide, recommencez.");
       isMatrixOn = true;
       whichIcon = ERROR;
     }
   }
 }
 
-int processLimitsMotor(String cmd) {
+void analyseCommand() {                                                                         //analyseCommand
+  cmd = "";
+  arg1 = "";
+  arg2 = "";
+
+  int firstStep = fullCmd.indexOf(';');
+  int secondStep = fullCmd.indexOf(';', firstStep + 1);
+
+  if (firstStep == -1) {
+    cmd = fullCmd;
+    return;
+  }
+
+  cmd = fullCmd.substring(0, firstStep);
+
+  if (secondStep != -1) {
+    arg1 = fullCmd.substring(firstStep + 1, secondStep);
+    arg2 = fullCmd.substring(secondStep + 1);
+  } else {
+    arg1 = fullCmd.substring(firstStep + 1);
+  }
+}
+
+int processLimitsMotor() {                                                                      //processLimitsMotor
   int pastLimit;
   int icon;
 
-  if (cmd.startsWith("cfg;lim_inf;")) {
+  if (arg1 == "lim_inf") {
     pastLimit = maxNear;
 
-    cmd = cmd.substring(13);
-    maxNear = cmd.toInt();
+    maxNear = arg2.toInt();
 
     icon = 1;
   }
-  else if (cmd.startsWith("cfg;lim_sup;")) {
+  else if (arg1 == "lim_sup") {
     pastLimit = maxFar;
 
-    cmd = cmd.substring(13);
-    maxFar = cmd.toInt();
+    maxFar = arg2.toInt();
 
     icon = 1;
   }
   else {
-    Serial.println("Arduino a compris: '" + cmd + "'! Ce n'est pas une commande valide, recommencez.");
+    Serial.println("Ce n'est pas une commande valide, recommencez.");
     icon = 2;
   }
 
@@ -153,7 +188,7 @@ int processLimitsMotor(String cmd) {
   return icon;
 }
 
-void display(unsigned long ct, int whichOne) {
+void displayIcon(unsigned long ct, int whichOne) {                                              //displayIcon
   unsigned static long timer;
   static bool isTimerStarted = false;
 
@@ -186,15 +221,16 @@ void display(unsigned long ct, int whichOne) {
 }
 
 //REFRESH AND DISTANCE
-void refreshScreen(unsigned long ct) {                                                          //refreshScreen
+void refreshScreen() {                                                                          //refreshScreen
   unsigned static long timer;
   static bool isTimerStarted = false;
 
   if (!isTimerStarted) {
-    timer = ct + 100;
+    timer = currentTime;
+    timer += 100;
     isTimerStarted = true;
   }
-  if (ct >= timer) {
+  if (currentTime >= timer) {
     screen();
     isTimerStarted = false;
   }
@@ -292,7 +328,7 @@ void motorOff() {                                                               
 }
 
 void stopTheSound() {                                                                           //stopTheSound
-  digitalWrite(ALARM, zero);
+  noTone(ALARM);
 
   if (distance <= alarmTreshold && distance != zero) {
     changeAlarmState = true;
@@ -305,7 +341,7 @@ void makeSound(unsigned long currentTime) {                                     
 
   if (distance > alarmTreshold) {
     if (!(isTimerStarted)) {
-      timer = currentTime + 2500;   //Je sais que c'est moins de 3000 milisecondes mais dû aux autres parti, ça se rapproche plus de 3 secondes
+      timer = currentTime + 3000;
       isTimerStarted = true;
     }
     else if (currentTime >= timer) {
@@ -318,13 +354,13 @@ void makeSound(unsigned long currentTime) {                                     
     isTimerStarted = false;
   }
 
-  digitalWrite(ALARM, 255);
+  tone(ALARM, 255);
 }
 
 void policeLights(unsigned long currentTime) {                                                  //policeLights
   static int redLedState = LOW;
   bool isChangingColor = false;
-  int delay = 50;
+  int delay = 60;
   static unsigned long lastTime = currentTime;
 
   if (currentTime - lastTime >= delay) {
